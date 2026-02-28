@@ -1,61 +1,46 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from openai import OpenAI
-import os
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class CommentRequest(BaseModel):
     comment: str
 
-response_schema = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "sentiment_response",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "sentiment": {
-                    "type": "string",
-                    "enum": ["positive", "negative", "neutral"]
-                },
-                "rating": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 5
-                }
-            },
-            "required": ["sentiment", "rating"],
-            "additionalProperties": False
-        }
-    }
-}
+positive_words = [
+    "good", "great", "excellent", "amazing", "love",
+    "awesome", "fantastic", "perfect", "happy"
+]
+
+negative_words = [
+    "bad", "terrible", "awful", "hate", "worst",
+    "poor", "disappointed", "angry", "horrible"
+]
 
 @app.post("/comment")
-async def analyze_comment(req: CommentRequest):
-    if not req.comment.strip():
+async def analyze_comment(request: CommentRequest):
+    text = request.comment.lower().strip()
+
+    if not text:
         raise HTTPException(status_code=400, detail="Comment cannot be empty")
 
-    try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=f"""
-Classify sentiment as positive, negative, or neutral.
-Return rating 1–5:
-5 = highly positive
-4 = positive
-3 = neutral
-2 = negative
-1 = highly negative
+    pos_score = sum(word in text for word in positive_words)
+    neg_score = sum(word in text for word in negative_words)
 
-Comment: {req.comment}
-""",
-            response_format=response_schema
-        )
+    if pos_score > neg_score:
+        sentiment = "positive"
+        rating = min(5, 3 + pos_score)
+    elif neg_score > pos_score:
+        sentiment = "negative"
+        rating = max(1, 3 - neg_score)
+    else:
+        sentiment = "neutral"
+        rating = 3
 
-        return response.output_parsed
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return JSONResponse(
+        content={
+            "sentiment": sentiment,
+            "rating": rating
+        },
+        media_type="application/json"
+    )
